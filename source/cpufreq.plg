@@ -1,0 +1,109 @@
+<?xml version='1.0' standalone='yes'?>
+
+<!DOCTYPE PLUGIN [
+<!ENTITY name      "cpufreq">
+<!ENTITY author    "Qoder">
+<!ENTITY version   "1.0.5">
+<!ENTITY launch    "CPUFreq">
+<!ENTITY gitURL    "https://raw.githubusercontent.com/shxtmaker/unraid-cpufreq/main">
+<!ENTITY pluginURL "&gitURL;/archive/cpufreq.plg">
+<!ENTITY support   "https://github.com/shxtmaker/unraid-cpufreq/issues">
+<!ENTITY plgPATH   "/boot/config/plugins/cpufreq">
+<!ENTITY emhttp    "/usr/local/emhttp/plugins/cpufreq">
+]>
+
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" support="&support;" min="6.9.0">
+
+<CHANGES>
+###1.0.5
+- Fix 404 on standalone page: rename page to CPUFreq.page (nginx only routes URLs starting with an uppercase letter to the page engine)
+###1.0.4
+- Per-core detail is now a standalone top navigation page (/cpufreq) instead of Tools sub-page
+- Trend chart: fixed Y-axis 1.0G-3.5G with 500 MHz ticks
+- Trend chart: higher rendering resolution (min 2x supersampling)
+###1.0.3
+- Trend chart: dynamic Y-axis scaled to actual data range with round 100 MHz ticks
+- Trend chart: crisp rendering at displayed size (HiDPI aware), redraw on resize
+###1.0.2
+- Fix dashboard integration: use Menu="Dashboard" tile page (mytiles/tbody) per Unraid 6.12+ spec
+###1.0.1
+- Fix .plg format: use capitalized FILE attributes and INLINE payloads per UNRAID plugin spec
+###1.0.0
+- Initial release
+- Dashboard widget showing average CPU frequency in CPU section
+- Dedicated page showing per-core real-time frequency with charts
+</CHANGES>
+
+<!--
+Payload files are embedded as plain text INLINE (CDATA) and written directly
+to the emhttp plugins directory.
+-->
+
+<FILE Name="&emhttp;/CPUFreq.page">
+<INLINE>
+<![CDATA[
+@cpufreq.page.content@
+]]>
+</INLINE>
+</FILE>
+
+<FILE Name="&emhttp;/cpufreq.php">
+<INLINE>
+<![CDATA[
+@cpufreq.php.content@
+]]>
+</INLINE>
+</FILE>
+
+<FILE Name="&emhttp;/cpufreqdash.page">
+<INLINE>
+<![CDATA[
+@cpufreqdash.page.content@
+]]>
+</INLINE>
+</FILE>
+
+<!-- Install script -->
+<FILE Run="/bin/bash">
+<INLINE>
+<![CDATA[
+# Set proper permissions
+chmod 644 /usr/local/emhttp/plugins/cpufreq/CPUFreq.page
+chmod 644 /usr/local/emhttp/plugins/cpufreq/cpufreq.php
+chmod 644 /usr/local/emhttp/plugins/cpufreq/cpufreqdash.page
+
+# Remove obsolete files from previous versions
+rm -rf /usr/local/emhttp/plugins/cpufreq/dashboard
+rm -f /usr/local/emhttp/plugins/cpufreq/cpufreq.page
+
+# Clean any stale state
+rm -f /tmp/cpufreq_*.json 2>/dev/null
+
+echo ""
+echo "----------------------------------------------------"
+echo " cpufreq plugin installed successfully."
+echo " - Dashboard widget: CPU average frequency"
+echo " - Page: top navigation bar -> CPU Frequency (/CPUFreq)"
+echo "----------------------------------------------------"
+echo ""
+]]>
+</INLINE>
+</FILE>
+
+<!-- Remove script -->
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+<![CDATA[
+# Remove plugin files
+rm -rf /usr/local/emhttp/plugins/cpufreq
+rm -rf /boot/config/plugins/cpufreq
+rm -f /tmp/cpufreq_*.json 2>/dev/null
+
+echo ""
+echo "cpufreq plugin removed."
+echo ""
+]]>
+</INLINE>
+</FILE>
+
+</PLUGIN>

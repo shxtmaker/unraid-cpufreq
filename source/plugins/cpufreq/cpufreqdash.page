@@ -1,0 +1,70 @@
+Menu="Dashboard:0"
+Icon="fa-line-chart"
+Cond="version_compare(parse_ini_file('/etc/unraid-version')['version'],'6.12.0-beta5', '>')"
+---
+<?php
+/* Copyright 2026, CPU Frequency Plugin for UNRAID */
+/* Dashboard tile: average CPU frequency (Unraid 6.12+ movable tile) */
+
+$cpufreq_plugin = "cpufreq";
+
+// Initial values rendered server-side, then refreshed via AJAX
+$cpufreq_vals = [];
+$cpuinfo = @file_get_contents('/proc/cpuinfo');
+if ($cpuinfo) {
+    preg_match_all('/^cpu MHz\s*:\s*([\d.]+)/m', $cpuinfo, $m);
+    if (!empty($m[1])) $cpufreq_vals = array_map('floatval', $m[1]);
+}
+if (empty($cpufreq_vals)) {
+    foreach (glob('/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq') ?: [] as $f) {
+        $v = @file_get_contents($f);
+        if ($v !== false) $cpufreq_vals[] = intval(trim($v)) / 1000;
+    }
+}
+$cpufreq_n   = count($cpufreq_vals);
+$cpufreq_avg = $cpufreq_n ? array_sum($cpufreq_vals) / $cpufreq_n : 0;
+$cpufreq_min = $cpufreq_n ? min($cpufreq_vals) : 0;
+$cpufreq_max = $cpufreq_n ? max($cpufreq_vals) : 0;
+
+function cpufreq_dash_fmt($mhz) {
+    return $mhz >= 1000 ? number_format($mhz / 1000, 2) . ' GHz' : number_format($mhz, 0) . ' MHz';
+}
+
+$avg0 = cpufreq_dash_fmt($cpufreq_avg);
+$min0 = cpufreq_dash_fmt($cpufreq_min);
+$max0 = cpufreq_dash_fmt($cpufreq_max);
+
+$mytiles[$cpufreq_plugin]['column1'] = <<<EOT
+<tbody id="tblCpuFreqDash" title="_(CPU Frequency)_">
+<tr><td><i class="fa fa-line-chart f32"></i>
+<div class="section">_(CPU Frequency)_<br>
+<span><i class="ups fa fa-tachometer"></i>_(Average)_: <span id="cpufreq-dash-head">$avg0</span></span><br><br></div>
+<a href="/CPUFreq" title="_(Go to per-core frequency detail)_"><i class="fa fa-fw fa-cog control"></i></a></td></tr>
+<tr class="header"><td><span class="w26">_(Average)_</span><span class="w26">_(Minimum)_</span><span class="w26">_(Maximum)_</span></td></tr>
+<tr><td><span class="w26"><span id="cpufreq-dash-avg">$avg0</span></span><span class="w26"><span id="cpufreq-dash-min">$min0</span></span><span class="w26"><span id="cpufreq-dash-max">$max0</span></span></td></tr>
+<tr><td><span class="w36">_(Cores)_: <span id="cpufreq-dash-cores">$cpufreq_n</span></span><span class="w44">_(Governor)_: <span id="cpufreq-dash-governor">--</span></span></td></tr>
+<tr><td><span></span></td></tr>
+</tbody>
+EOT;
+?>
+
+<script type="text/javascript">
+(function() {
+    function cpufreqFmt(mhz) {
+        return mhz >= 1000 ? (mhz / 1000).toFixed(2) + ' GHz' : Math.round(mhz) + ' MHz';
+    }
+    function cpufreqDashRefresh() {
+        $.getJSON('/plugins/cpufreq/cpufreq.php', function(data) {
+            if (!data || data.avg_mhz === undefined) return;
+            $('#cpufreq-dash-head').text(cpufreqFmt(data.avg_mhz));
+            $('#cpufreq-dash-avg').text(cpufreqFmt(data.avg_mhz));
+            $('#cpufreq-dash-min').text(cpufreqFmt(data.min_mhz));
+            $('#cpufreq-dash-max').text(cpufreqFmt(data.max_mhz));
+            $('#cpufreq-dash-cores').text(data.core_count);
+            $('#cpufreq-dash-governor').text(data.governor || 'N/A');
+        });
+    }
+    cpufreqDashRefresh();
+    setInterval(cpufreqDashRefresh, 3000);
+})();
+</script>
