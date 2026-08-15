@@ -10,6 +10,7 @@ $PluginDir = Join-Path $SourceDir "plugins\cpufreq"
 $OutputDir = Join-Path $ScriptDir "archive"
 $Template = Join-Path $SourceDir "cpufreq.plg"
 $Output = Join-Path $OutputDir "cpufreq.plg"
+$OutputTemp = Join-Path $OutputDir (".cpufreq.plg." + [guid]::NewGuid().ToString("N"))
 
 if (-not (Test-Path $OutputDir)) {
     New-Item -ItemType Directory -Path $OutputDir | Out-Null
@@ -17,10 +18,8 @@ if (-not (Test-Path $OutputDir)) {
 
 Write-Host "Building cpufreq plugin..."
 
-# Read template
 $PlgContent = Get-Content -Path $Template -Raw
 
-# Read a payload file, normalize CRLF -> LF, and validate it is CDATA-safe
 function Read-PayloadFile {
     param([string]$FilePath)
     $content = [System.IO.File]::ReadAllText($FilePath)
@@ -31,11 +30,6 @@ function Read-PayloadFile {
     return $content.TrimEnd("`n")
 }
 
-# Embed each payload file into its placeholder
-Write-Host "  Embedding CPUFreq.page..."
-$page = Read-PayloadFile (Join-Path $PluginDir "CPUFreq.page")
-$PlgContent = $PlgContent.Replace("@cpufreq.page.content@", $page)
-
 Write-Host "  Embedding cpufreq.php..."
 $php = Read-PayloadFile (Join-Path $PluginDir "cpufreq.php")
 $PlgContent = $PlgContent.Replace("@cpufreq.php.content@", $php)
@@ -44,10 +38,18 @@ Write-Host "  Embedding cpufreqdash.page..."
 $dash = Read-PayloadFile (Join-Path $PluginDir "cpufreqdash.page")
 $PlgContent = $PlgContent.Replace("@cpufreqdash.page.content@", $dash)
 
-# Write output with Unix line endings (LF) and no BOM - required for UNRAID/Linux
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $PlgContentLF = $PlgContent.Replace("`r`n", "`n")
-[System.IO.File]::WriteAllText($Output, $PlgContentLF, $utf8NoBom)
+if ($PlgContentLF -match '@[a-z.]+\.content@') {
+    throw "Unreplaced payload placeholder found"
+}
+
+try {
+    [System.IO.File]::WriteAllText($OutputTemp, $PlgContentLF, $utf8NoBom)
+    Move-Item -Path $OutputTemp -Destination $Output -Force
+} finally {
+    if (Test-Path $OutputTemp) { Remove-Item $OutputTemp -Force }
+}
 
 Write-Host ""
 Write-Host "Build complete: $Output"

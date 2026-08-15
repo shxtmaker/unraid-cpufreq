@@ -1,70 +1,271 @@
-Menu="Dashboard:0"
-Icon="fa-line-chart"
-Cond="version_compare(parse_ini_file('/etc/unraid-version')['version'],'6.12.0-beta5', '>')"
+Menu="Dashboard"
+Cond="version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.3.0','>=') && preg_match('/^6\\.18\\./', php_uname('r'))"
 ---
-<?php
-/* Copyright 2026, CPU Frequency Plugin for UNRAID */
-/* Dashboard tile: average CPU frequency (Unraid 6.12+ movable tile) */
-
-$cpufreq_plugin = "cpufreq";
-
-// Initial values rendered server-side, then refreshed via AJAX
-$cpufreq_vals = [];
-$cpuinfo = @file_get_contents('/proc/cpuinfo');
-if ($cpuinfo) {
-    preg_match_all('/^cpu MHz\s*:\s*([\d.]+)/m', $cpuinfo, $m);
-    if (!empty($m[1])) $cpufreq_vals = array_map('floatval', $m[1]);
-}
-if (empty($cpufreq_vals)) {
-    foreach (glob('/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq') ?: [] as $f) {
-        $v = @file_get_contents($f);
-        if ($v !== false) $cpufreq_vals[] = intval(trim($v)) / 1000;
-    }
-}
-$cpufreq_n   = count($cpufreq_vals);
-$cpufreq_avg = $cpufreq_n ? array_sum($cpufreq_vals) / $cpufreq_n : 0;
-$cpufreq_min = $cpufreq_n ? min($cpufreq_vals) : 0;
-$cpufreq_max = $cpufreq_n ? max($cpufreq_vals) : 0;
-
-function cpufreq_dash_fmt($mhz) {
-    return $mhz >= 1000 ? number_format($mhz / 1000, 2) . ' GHz' : number_format($mhz, 0) . ' MHz';
+<style>
+.cpufreq-frequency {
+    color: inherit;
+    font-family: monospace;
+    white-space: nowrap;
 }
 
-$avg0 = cpufreq_dash_fmt($cpufreq_avg);
-$min0 = cpufreq_dash_fmt($cpufreq_min);
-$max0 = cpufreq_dash_fmt($cpufreq_max);
+.cpufreq-frequency-total {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    margin-left: .5rem;
+}
 
-$mytiles[$cpufreq_plugin]['column1'] = <<<EOT
-<tbody id="tblCpuFreqDash" title="_(CPU Frequency)_">
-<tr><td><i class="fa fa-line-chart f32"></i>
-<div class="section">_(CPU Frequency)_<br>
-<span><i class="ups fa fa-tachometer"></i>_(Average)_: <span id="cpufreq-dash-head">$avg0</span></span><br><br></div>
-<a href="/CPUFreq" title="_(Go to per-core frequency detail)_"><i class="fa fa-fw fa-cog control"></i></a></td></tr>
-<tr class="header"><td><span class="w26">_(Average)_</span><span class="w26">_(Minimum)_</span><span class="w26">_(Maximum)_</span></td></tr>
-<tr><td><span class="w26"><span id="cpufreq-dash-avg">$avg0</span></span><span class="w26"><span id="cpufreq-dash-min">$min0</span></span><span class="w26"><span id="cpufreq-dash-max">$max0</span></span></td></tr>
-<tr><td><span class="w36">_(Cores)_: <span id="cpufreq-dash-cores">$cpufreq_n</span></span><span class="w44">_(Governor)_: <span id="cpufreq-dash-governor">--</span></span></td></tr>
-<tr><td><span></span></td></tr>
-</tbody>
-EOT;
-?>
+.cpufreq-frequency-core {
+    display: inline-block;
+    margin-left: .5rem;
+    font-size: .9em;
+}
+</style>
 
 <script type="text/javascript">
 (function() {
-    function cpufreqFmt(mhz) {
+    'use strict';
+
+    if (window.__cpufreqDashboardIntegration) return;
+    window.__cpufreqDashboardIntegration = true;
+
+    var endpoint = '/plugins/cpufreq/cpufreq.php?compact=1';
+    var refreshMs = 5000;
+    var observerWaitMs = 10000;
+    var pollTimer = null;
+    var observer = null;
+    var observerTimer = null;
+    var request = null;
+    var cachedTile = null;
+    var cachedFields = null;
+
+    function cpuTile() {
+        return document.querySelector('tbody[data="toggleCPU(true)"]');
+    }
+
+    function formatFrequency(mhz) {
+        if (typeof mhz !== 'number' || !isFinite(mhz) || mhz < 0) return 'N/A';
         return mhz >= 1000 ? (mhz / 1000).toFixed(2) + ' GHz' : Math.round(mhz) + ' MHz';
     }
-    function cpufreqDashRefresh() {
-        $.getJSON('/plugins/cpufreq/cpufreq.php', function(data) {
-            if (!data || data.avg_mhz === undefined) return;
-            $('#cpufreq-dash-head').text(cpufreqFmt(data.avg_mhz));
-            $('#cpufreq-dash-avg').text(cpufreqFmt(data.avg_mhz));
-            $('#cpufreq-dash-min').text(cpufreqFmt(data.min_mhz));
-            $('#cpufreq-dash-max').text(cpufreqFmt(data.max_mhz));
-            $('#cpufreq-dash-cores').text(data.core_count);
-            $('#cpufreq-dash-governor').text(data.governor || 'N/A');
+
+    function frequencyElement(className, attribute, value) {
+        var element = document.createElement('span');
+        element.className = className;
+        element.setAttribute(attribute, value);
+        element.textContent = 'N/A';
+        return element;
+    }
+
+    function syncFrequencyColor(frequency, source) {
+        if (!frequency || !source) return;
+        var color = source.style ? source.style.color : '';
+        if (!color && window.getComputedStyle) color = window.getComputedStyle(source).color;
+        if (color) frequency.style.color = color;
+    }
+
+    function loadRowLabel(loadElement) {
+        var row = loadElement.closest('tr');
+        return row ? row.querySelector('span.w26') : null;
+    }
+
+    function ensureTotalFrequency(tile) {
+        var totalLoad = tile.querySelector('span.cpu.load');
+        if (!totalLoad) return null;
+
+        var label = loadRowLabel(totalLoad);
+        if (!label) return null;
+
+        var total = label.querySelector('[data-cpufreq-average]');
+        if (!total) {
+            total = frequencyElement('cpufreq-frequency cpufreq-frequency-total', 'data-cpufreq-average', 'true');
+            total.innerHTML = '<i class="fa fa-tachometer" title="Average Frequency"></i><span class="cpufreq-frequency-value">N/A</span>';
+            label.appendChild(total);
+        }
+        return total;
+    }
+
+    function cpuId(loadElement) {
+        for (var i = 0; i < loadElement.classList.length; i++) {
+            var match = /^cpu(\d+)$/.exec(loadElement.classList[i]);
+            if (match) return parseInt(match[1], 10);
+        }
+        return null;
+    }
+
+    function ensureCoreFrequency(loadElement) {
+        var id = cpuId(loadElement);
+        if (id === null) return null;
+
+        var label = loadRowLabel(loadElement);
+        if (!label) return null;
+
+        var selector = '[data-cpufreq-core="' + id + '"]';
+        var existing = label.querySelector(selector);
+        if (existing) {
+            syncFrequencyColor(existing, loadElement);
+            return existing;
+        }
+
+        var frequency = frequencyElement('cpufreq-frequency cpufreq-frequency-core', 'data-cpufreq-core', String(id));
+        syncFrequencyColor(frequency, loadElement);
+        label.appendChild(frequency);
+        return frequency;
+    }
+
+    function fieldsAreConnected(fields) {
+        if (!fields || !fields.average || !fields.average.isConnected ||
+            !fields.averageLoad || !fields.averageLoad.isConnected) return false;
+
+        var ids = Object.keys(fields.cores);
+        if (ids.length === 0) return false;
+        for (var i = 0; i < ids.length; i++) {
+            if (!fields.cores[ids[i]] || !fields.cores[ids[i]].isConnected ||
+                !fields.coreLoads[ids[i]] || !fields.coreLoads[ids[i]].isConnected) return false;
+        }
+        return true;
+    }
+
+    function ensureFrequencyFields(tile) {
+        if (cachedTile === tile && fieldsAreConnected(cachedFields)) return cachedFields;
+
+        var fields = {
+            average: ensureTotalFrequency(tile),
+            averageLoad: tile.querySelector('span.cpu.load'),
+            cores: {},
+            coreLoads: {}
+        };
+        var loads = tile.querySelectorAll('span[class*="load"]');
+
+        for (var i = 0; i < loads.length; i++) {
+            var id = cpuId(loads[i]);
+            if (id === null) continue;
+            var field = ensureCoreFrequency(loads[i]);
+            if (field) {
+                fields.cores[id] = field;
+                fields.coreLoads[id] = loads[i];
+            }
+        }
+
+        cachedTile = tile;
+        cachedFields = fields;
+        return fields;
+    }
+
+    function updateFields(data) {
+        var tile = cpuTile();
+        if (!tile || !data) return;
+
+        var fields = ensureFrequencyFields(tile);
+        if (fields.average) {
+            syncFrequencyColor(fields.average, fields.averageLoad);
+            var averageValue = fields.average.querySelector('.cpufreq-frequency-value');
+            if (averageValue) averageValue.textContent = formatFrequency(data.avg_mhz);
+        }
+
+        var readings = {};
+        var cores = Array.isArray(data.cores) ? data.cores : [];
+        cores.forEach(function(core) {
+            if (!core) return;
+            readings[core.cpu !== undefined ? core.cpu : core.core] = core.mhz;
+        });
+
+        Object.keys(fields.cores).forEach(function(id) {
+            if (!fields.cores[id]) return;
+            syncFrequencyColor(fields.cores[id], fields.coreLoads[id]);
+            fields.cores[id].textContent = formatFrequency(readings[id]);
         });
     }
-    cpufreqDashRefresh();
-    setInterval(cpufreqDashRefresh, 3000);
+
+    function stopObserver() {
+        if (observer) observer.disconnect();
+        observer = null;
+        if (observerTimer !== null) window.clearTimeout(observerTimer);
+        observerTimer = null;
+    }
+
+    function stopPolling() {
+        if (pollTimer !== null) window.clearInterval(pollTimer);
+        pollTimer = null;
+    }
+
+    function stopRequest() {
+        if (!request) return;
+        var pending = request;
+        request = null;
+        pending.abort();
+    }
+
+    function refresh() {
+        if (document.hidden || request) return;
+
+        var tile = cpuTile();
+        if (!tile) {
+            stopPolling();
+            cachedTile = null;
+            cachedFields = null;
+            waitForTile();
+            return;
+        }
+
+        var current = $.ajax({ url: endpoint, dataType: 'json', timeout: 4000 });
+        request = current;
+        current
+            .done(function(data) { updateFields(data); })
+            .fail(function(_xhr, status) {
+                if (status !== 'abort') updateFields({ avg_mhz: null, cores: [] });
+            })
+            .always(function() {
+                if (request === current) request = null;
+            });
+    }
+
+    function startPolling() {
+        if (document.hidden || pollTimer !== null) return;
+        if (!cpuTile()) {
+            waitForTile();
+            return;
+        }
+
+        stopObserver();
+        refresh();
+        pollTimer = window.setInterval(refresh, refreshMs);
+    }
+
+    function waitForTile() {
+        if (document.hidden || observer || cpuTile()) {
+            if (cpuTile()) startPolling();
+            return;
+        }
+
+        if (window.MutationObserver) {
+            observer = new MutationObserver(function() {
+                if (cpuTile()) startPolling();
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            observerTimer = window.setTimeout(stopObserver, observerWaitMs);
+        }
+    }
+
+    function deactivate() {
+        stopPolling();
+        stopObserver();
+        stopRequest();
+    }
+
+    function activate() {
+        if (document.hidden) {
+            deactivate();
+            return;
+        }
+        if (cpuTile()) startPolling();
+        else waitForTile();
+    }
+
+    $(function() {
+        activate();
+        document.addEventListener('visibilitychange', activate);
+        window.addEventListener('pagehide', deactivate);
+        window.addEventListener('pageshow', activate);
+    });
 })();
 </script>

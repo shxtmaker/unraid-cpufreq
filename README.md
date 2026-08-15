@@ -1,106 +1,165 @@
-# CPUFreq - UNRAID CPU 频率监控插件
+# CPUFreq：Unraid CPU 频率监控插件
 
-实时显示 CPU 各核心运行频率的 UNRAID 插件。
+为 Unraid 原生 Dashboard CPU 磁贴补充逻辑处理器实时频率信息。
 
-## 功能特性
+插件不创建独立页面，也不创建独立 Dashboard 磁贴。
 
-- **仪表盘集成**：在 Dashboard 的 CPU 区域显示全核平均频率、最低/最高频率，每 3 秒自动刷新
-- **独立详情页面**：顶部导航栏 `CPU Frequency` 独立标签页，展示每个核心的实时频率
-  - 每核心频率卡片 + 负载进度条
-  - 平均频率趋势图（最近 60 次采样）
-  - 基准频率参考线
-  - 可调刷新间隔（1s / 2s / 5s / 10s），支持暂停
-- **数据来源**：优先读取 `/proc/cpuinfo`，自动回退到 `/sys/devices/system/cpu/*/cpufreq/` 接口
+> 当前验证目标：Unraid 7.3.2、Linux `6.18.38-Unraid`。
 
-## 系统要求
+## 功能
 
-- UNRAID OS 6.9.0 或更高版本
-- 仪表盘组件需要 UNRAID 6.10+（旧版本仅独立页面可用）
+- 在原生 CPU 磁贴详情中，紧接 `CPU N` 后显示当前频率，并与占用率保持同一行。
+- 在 `Overall Load` 总计标签后显示本次采样的平均频率，并与总计占用率保持同一行。
+- 使用 5 秒轮询间隔，与 Unraid CPU 占用率轮询频率保持一致。
+- 浏览器页面进入后台或离开 Dashboard 后暂停请求，返回时自动恢复。
+- 优先读取 `/proc/cpuinfo`，缺少读数时再使用 sysfs 补充：
+  `/sys/devices/system/cpu/*/cpufreq/scaling_cur_freq`。
+- 单个逻辑处理器读取失败时显示 `N/A`，不参与平均值计算。
+- 保留 API 的 `core` 字段作为兼容别名，新代码使用 `cpu` 字段。
 
-## 构建插件
+## 支持范围
 
-### Windows (PowerShell)
+| 类型 | 范围 | 说明 |
+| --- | --- | --- |
+| 验证目标 | Unraid 7.3.2 + Linux `6.18.38-Unraid` | 已按该版本的 WebGUI 和内核接口适配 |
+| 兼容支持 | Unraid 7.3.0 及以上 + Linux `6.18.x` | 保留 Dashboard 集成脚本加载支持，未逐版本验证 |
+| 不支持注入 | 其他内核系列 | 不向 Dashboard 注入内容，但保留数据接口文件 |
 
-```powershell
-cd cpufreq
-.\build.ps1
-```
+## 快速安装
 
-### Linux / UNRAID (Bash)
+### 通过 WebGUI 安装
+
+1. 登录 Unraid WebGUI。
+2. 打开 `Plugins`，点击 `Install Plugin`。
+3. 输入插件地址：
+
+   ```text
+   https://raw.githubusercontent.com/shxtmaker/unraid-cpufreq/main/archive/cpufreq.plg
+   ```
+
+4. 点击 `Install`，确认插件来源并等待安装完成。
+5. 返回 `Dashboard`，刷新页面并展开原生 CPU 磁贴详情。
+
+### 通过命令行安装
+
+通过 SSH 或 Unraid 本地终端执行：
 
 ```bash
-cd cpufreq
+plugin install https://raw.githubusercontent.com/shxtmaker/unraid-cpufreq/main/archive/cpufreq.plg
+```
+
+## 从源码构建
+
+### Linux / Unraid
+
+```bash
 chmod +x build.sh
 ./build.sh
 ```
 
-构建完成后，最终插件文件位于 `archive/cpufreq.plg`。
+### Windows PowerShell
 
-## 安装方法
-
-### 方法一：通过 Web 界面安装
-
-1. 将 `archive/cpufreq.plg` 复制到 U 盘的 `/boot/config/plugins/` 目录
-2. 重启 UNRAID（或在终端执行 `plugin install /boot/config/plugins/cpufreq.plg`）
-3. 在 `Plugins` 标签页确认插件已安装
-
-### 方法二：通过 URL 安装（推荐）
-
-在 UNRAID Web 界面 `Plugins -> Install Plugin` 输入：
-
-```
-https://raw.githubusercontent.com/shxtmaker/unraid-cpufreq/main/archive/cpufreq.plg
+```powershell
+.\build.ps1
 ```
 
-安装后可通过 `Plugins -> Check for Updates` 在线更新。
+构建产物为：
 
-### 方法三：命令行安装
+```text
+archive/cpufreq.plg
+```
+
+## 安装本地构建产物
+
+将本地构建产物 `archive/cpufreq.plg` 复制到 Unraid 的
+`/boot/config/plugins/`，然后执行：
 
 ```bash
-# 将 plg 文件上传到服务器后（新版 UNRAID 已移除 installplg，统一使用 plugin 命令）
-plugin install /path/to/cpufreq.plg
-
-# 卸载
-plugin remove cpufreq.plg
+plugin install /boot/config/plugins/cpufreq.plg
 ```
 
-## 使用方法
+安装脚本会写入插件文件，并清理旧版本遗留的独立页面、独立磁贴和临时状态文件。
 
-1. **仪表盘**：打开 Dashboard 页面，CPU 区域下方会显示 "CPU Frequency" 平均频率信息
-2. **详情页面**：点击顶部导航栏 `CPU Frequency` 标签，或直接访问 `http://<服务器IP>/CPUFreq`
-3. 点击仪表盘组件中的 "Per-Core Detail" 链接可快速跳转到详情页
+## 安装后验证
+
+安装完成后，在 Dashboard 中检查：
+
+- `Plugins` 列表中出现 `CPUFreq`。
+- 页面中没有独立 CPUFreq 页面或独立 CPUFreq 磁贴。
+- 展开原生 CPU 磁贴详情后，每个 `CPU N` 行显示当前频率。
+- `Overall Load` 总计行显示 `Average Frequency`。
+- 某个频率无法读取时，该行显示 `N/A`。
+
+如果没有显示频率：
+
+1. 对 Dashboard 执行浏览器强制刷新。
+2. 确认主机运行的是 Linux `6.18.x` 内核。
+3. 检查插件文件是否存在：
+
+   ```bash
+   ls -l /usr/local/emhttp/plugins/cpufreq/
+   ```
+
+## 更新
+
+重复执行安装步骤即可更新插件。安装脚本会覆盖当前版本并清理旧版本文件。
+
+更新完成后刷新 Dashboard，并按照“安装后验证”检查 CPU 磁贴内容。
 
 ## 卸载
 
-在 `Plugins` 标签页找到 CPU Frequency 插件，点击 Remove 即可。
+### 通过 WebGUI 卸载
+
+1. 打开 Unraid WebGUI 的 `Plugins` 页面。
+2. 找到 `CPUFreq`。
+3. 点击 `Remove` 或 `Uninstall`。
+
+### 通过命令行卸载
+
+```bash
+plugin remove cpufreq.plg
+```
+
+卸载不会修改 Unraid 系统文件，会移除插件目录、Dashboard 集成脚本和插件配置目录。
 
 ## 项目结构
 
-```
+```text
 unraid-cpufreq/
-├── README.md                         # 本文档
-├── LICENSE                           # MIT 许可证
-├── build.sh                          # Linux 构建脚本
-├── build.ps1                         # Windows 构建脚本
-├── verify.ps1                        # 构建产物格式校验脚本
+├── README.md
+├── LICENSE
+├── build.sh
+├── build.ps1
+├── verify.ps1
 ├── archive/
-│   └── cpufreq.plg                   # 构建产物（最终安装包，URL 安装指向此文件）
+│   └── cpufreq.plg
+├── CONTEXT.md
+├── docs/adr/
+│   └── 0001-inject-frequency-into-native-cpu-tile.md
 └── source/
-    ├── cpufreq.plg                   # PLG 模板（含占位符）
+    ├── cpufreq.plg
     └── plugins/cpufreq/
-        ├── CPUFreq.page              # 独立页面（顶部导航栏，单核频率详情 /CPUFreq）
-        ├── cpufreq.php               # AJAX 数据接口（JSON）
-        └── cpufreqdash.page          # 仪表盘磁贴（平均频率，UNRAID 6.12+）
+        ├── cpufreq.php
+        └── cpufreqdash.page
 ```
 
-## 技术说明
+## 数据接口
 
-- 频率数据通过 PHP 读取 `/proc/cpuinfo` 中的 `cpu MHz` 字段获取
-- 若系统启用了 cpufreq 驱动，会额外读取调速器（governor）和最大睿频信息
-- 前端使用原生 Canvas 绘制趋势图，无外部依赖
-- AJAX 接口返回 JSON 格式数据，可供第三方集成调用：`GET /plugins/cpufreq/cpufreq.php`
+完整接口：
 
-## API 响应示例
+```text
+GET /plugins/cpufreq/cpufreq.php
+```
+
+Dashboard 使用紧凑接口：
+
+```text
+GET /plugins/cpufreq/cpufreq.php?compact=1
+```
+
+紧凑接口只返回 `avg_mhz` 和 `cores`，减少周期请求中的文件读取和响应体积。完整接口保持兼容。
+
+完整接口返回示例：
 
 ```json
 {
@@ -114,12 +173,16 @@ unraid-cpufreq/
   "boost_mhz": 4400,
   "governor": "performance",
   "cores": [
-    {"core": 0, "mhz": 3712.45},
-    {"core": 1, "mhz": 3698.12}
+    {"cpu": 0, "core": 0, "mhz": 3712.45},
+    {"cpu": 1, "core": 1, "mhz": 3698.12}
   ]
 }
 ```
 
-## License
+## 作者
+
+[shxtmaker](https://github.com/shxtmaker)
+
+## 许可证
 
 [MIT](LICENSE)

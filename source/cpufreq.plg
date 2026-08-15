@@ -2,9 +2,8 @@
 
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "cpufreq">
-<!ENTITY author    "Qoder">
-<!ENTITY version   "1.0.5">
-<!ENTITY launch    "CPUFreq">
+<!ENTITY author    "shxtmaker">
+<!ENTITY version   "2.0.5">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/shxtmaker/unraid-cpufreq/main">
 <!ENTITY pluginURL "&gitURL;/archive/cpufreq.plg">
 <!ENTITY support   "https://github.com/shxtmaker/unraid-cpufreq/issues">
@@ -12,9 +11,28 @@
 <!ENTITY emhttp    "/usr/local/emhttp/plugins/cpufreq">
 ]>
 
-<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" support="&support;" min="6.9.0">
+<PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" support="&support;" min="7.3.0">
 
 <CHANGES>
+###2.0.5
+- Moved frequency nodes to the CPU and Overall Load label spans, isolating them from native load-bar updates.
+###2.0.4
+- Prevented DOM insertion errors from stopping all frequency rendering when the usage bar is nested.
+###2.0.3
+- Placed per-CPU and average-frequency values before the usage bar so they remain on the CPU load row.
+###2.0.2
+- Matched per-CPU and average-frequency text colors to the native CPU load color.
+- Mounted average frequency inside the Overall Load row container.
+###2.0.1
+- Fixed per-processor frequency placement so values remain inside the CPU detail rows.
+###2.0.0
+- Reworked and verified against Unraid 7.3.2 with Linux 6.18.38-Unraid.
+- Retained compatibility loading for Unraid 7.3.0 or newer on the Linux 6.18.x kernel series; other versions are not individually verified.
+- Removed the standalone CPU Frequency page and separate Dashboard tile.
+- Added per-logical-CPU frequency to the native CPU tile details and average frequency to the overall row.
+- Frequency refresh follows Unraid CPU load polling at 5 seconds.
+- Reduced periodic work with a compact API response, conditional sysfs fallback, cached DOM bindings, and background-page suspension.
+- Improved missing-frequency handling by parsing each logical processor block independently.
 ###1.0.5
 - Fix 404 on standalone page: rename page to CPUFreq.page (nginx only routes URLs starting with an uppercase letter to the page engine)
 ###1.0.4
@@ -39,14 +57,6 @@ Payload files are embedded as plain text INLINE (CDATA) and written directly
 to the emhttp plugins directory.
 -->
 
-<FILE Name="&emhttp;/CPUFreq.page">
-<INLINE>
-<![CDATA[
-@cpufreq.page.content@
-]]>
-</INLINE>
-</FILE>
-
 <FILE Name="&emhttp;/cpufreq.php">
 <INLINE>
 <![CDATA[
@@ -68,13 +78,14 @@ to the emhttp plugins directory.
 <INLINE>
 <![CDATA[
 # Set proper permissions
-chmod 644 /usr/local/emhttp/plugins/cpufreq/CPUFreq.page
 chmod 644 /usr/local/emhttp/plugins/cpufreq/cpufreq.php
 chmod 644 /usr/local/emhttp/plugins/cpufreq/cpufreqdash.page
 
-# Remove obsolete files from previous versions
-rm -rf /usr/local/emhttp/plugins/cpufreq/dashboard
+# Remove obsolete UI files from previous versions
+rm -f /usr/local/emhttp/plugins/cpufreq/CPUFreq.page
 rm -f /usr/local/emhttp/plugins/cpufreq/cpufreq.page
+rm -f /usr/local/emhttp/plugins/cpufreq/dashboard.page
+rm -rf /usr/local/emhttp/plugins/cpufreq/dashboard
 
 # Clean any stale state
 rm -f /tmp/cpufreq_*.json 2>/dev/null
@@ -82,8 +93,8 @@ rm -f /tmp/cpufreq_*.json 2>/dev/null
 echo ""
 echo "----------------------------------------------------"
 echo " cpufreq plugin installed successfully."
-echo " - Dashboard widget: CPU average frequency"
-echo " - Page: top navigation bar -> CPU Frequency (/CPUFreq)"
+echo " - Dashboard: native CPU tile includes per-CPU frequency"
+echo " - Average frequency: shown in the Overall Load row"
 echo "----------------------------------------------------"
 echo ""
 ]]>
